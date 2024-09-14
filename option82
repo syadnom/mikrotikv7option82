@@ -1,0 +1,130 @@
+# Set this to true for verbose logging, false for summary only
+:local debug false
+
+# Set the lease time for static leases (in minutes)
+:local staticLeaseTime 30m
+
+# Function to log messages based on debug setting
+:local logInfo do={
+    :if ($debug = true) do={
+        :log info $message
+    }
+}
+
+$logInfo message="---"
+:log info "Starting DHCP lease comparison, MAC/Client-ID update, and conversion script"
+
+$logInfo message="Fetching dynamic leases for server 'APs'..."
+:local dynamicLeases [:toarray [/ip dhcp-server lease print as-value show-ids proplist=agent-circuit-id,agent-remote-id,address,active-mac-address,mac-address,client-id where server="APs" dynamic=yes]]
+:log info ("Found " . [:len $dynamicLeases] . " dynamic leases")
+
+$logInfo message="Fetching static leases for server 'APs'..."
+:local staticLeases [:toarray [/ip dhcp-server lease print as-value show-ids proplist=agent-circuit-id,agent-remote-id,address,active-mac-address,mac-address,client-id where server="APs" dynamic=no]]
+:log info ("Found " . [:len $staticLeases] . " static leases")
+
+$logInfo message="Beginning comparison of dynamic leases to static leases..."
+
+:local processedLeases 0
+:local skippedLeases 0
+:local matchedLeases 0
+:local updatedMacs 0
+:local updatedClientIds 0
+:local convertedLeases 0
+:local updatedLeaseTime 0
+
+:foreach dynamicLease in=$dynamicLeases do={
+    :set processedLeases ($processedLeases + 1)
+    :local dynamicAgentCircuitId ($dynamicLease->"agent-circuit-id")
+    :local dynamicAgentRemoteId ($dynamicLease->"agent-remote-id")
+    :local dynamicAddress ($dynamicLease->"address")
+    :local dynamicActiveMac ($dynamicLease->"active-mac-address")
+    :local dynamicMac ($dynamicLease->"mac-address")
+    :local dynamicClientId ($dynamicLease->"client-id")
+    :local dynamicId ($dynamicLease->".id")
+    
+    $logInfo message=("Processing dynamic lease " . $processedLeases . " of " . [:len $dynamicLeases])
+    $logInfo message=("  Lease ID: " . $dynamicId)
+    $logInfo message=("  Address: " . $dynamicAddress)
+    $logInfo message=("  Active MAC: " . $dynamicActiveMac)
+    $logInfo message=("  MAC: " . $dynamicMac)
+    $logInfo message=("  Client ID: " . $dynamicClientId)
+    $logInfo message=("  Agent Circuit ID: " . $dynamicAgentCircuitId)
+    $logInfo message=("  Agent Remote ID: " . $dynamicAgentRemoteId)
+    
+    # Check if agent-circuit-id is not blank
+    :if ($dynamicAgentCircuitId != "" && $dynamicAgentCircuitId != nil) do={
+        $logInfo message="  Searching for matching static lease..."
+        :local found false
+        :local checkedStaticLeases 0
+        :foreach staticLease in=$staticLeases do={
+            :set checkedStaticLeases ($checkedStaticLeases + 1)
+            :local staticAgentCircuitId ($staticLease->"agent-circuit-id")
+            :local staticId ($staticLease->".id")
+            :local staticMac ($staticLease->"mac-address")
+            :local staticClientId ($staticLease->"client-id")
+            
+            $logInfo message=("    Checking static lease " . $checkedStaticLeases . " of " . [:len $staticLeases])
+            $logInfo message=("      Static Lease ID: " . $staticId)
+            $logInfo message=("      Static Agent Circuit ID: " . $staticAgentCircuitId)
+            
+            # Check if static agent-circuit-id is not blank and matches
+            :if ($staticAgentCircuitId != "" && $staticAgentCircuitId != nil && $staticAgentCircuitId = $dynamicAgentCircuitId) do={
+                :set found true
+                :set matchedLeases ($matchedLeases + 1)
+                $logInfo message="  Match found!"
+                
+                # Update MAC address if different
+                :if ($staticMac != $dynamicMac) do={
+                    $logInfo message=("  Updating static lease MAC from " . $staticMac . " to " . $dynamicMac)
+                    /ip dhcp-server lease set $staticId mac-address=$dynamicMac
+                    :set updatedMacs ($updatedMacs + 1)
+                } else={
+                    $logInfo message="  MAC address is already up to date"
+                }
+                
+                # Update Client ID if different
+                :if ($staticClientId != $dynamicClientId) do={
+                    $logInfo message=("  Updating static lease Client ID from " . $staticClientId . " to " . $dynamicClientId)
+                    /ip dhcp-server lease set $staticId client-id=$dynamicClientId
+                    :set updatedClientIds ($updatedClientIds + 1)
+                } else={
+                    $logInfo message="  Client ID is already up to date"
+                }
+                
+                # Update lease time
+                $logInfo message=("  Setting lease time to " . $staticLeaseTime)
+                /ip dhcp-server lease set $staticId lease-time=$staticLeaseTime
+                :set updatedLeaseTime ($updatedLeaseTime + 1)
+                
+                :break
+            }
+        }
+        
+        :if ($found = false) do={
+            $logInfo message="  No match found. Converting dynamic lease to static..."
+            :local comment ("ACI: " . $dynamicAgentCircuitId . " ARI: " . $dynamicAgentRemoteId)
+            /ip dhcp-server lease make-static $dynamicId
+            /ip dhcp-server lease set $dynamicId comment=$comment client-id=$dynamicClientId lease-time=$staticLeaseTime
+            :set convertedLeases ($convertedLeases + 1)
+            :set updatedLeaseTime ($updatedLeaseTime + 1)
+            $logInfo message=("  Converted to static lease. Comment added: " . $comment)
+            $logInfo message=("  Client ID set to: " . $dynamicClientId)
+            $logInfo message=("  Lease time set to: " . $staticLeaseTime)
+        }
+    } else={
+        :set skippedLeases ($skippedLeases + 1)
+        $logInfo message="  Skipping this lease due to blank Agent Circuit ID"
+    }
+    
+    $logInfo message="---"
+}
+
+:log info "Lease comparison, MAC/Client-ID update, and conversion complete"
+:log info ("Total dynamic leases processed: " . $processedLeases)
+:log info ("Leases skipped due to blank Agent Circuit ID: " . $skippedLeases)
+:log info ("Leases with matching static entries: " . $matchedLeases)
+:log info ("Static leases with updated MAC addresses: " . $updatedMacs)
+:log info ("Static leases with updated Client IDs: " . $updatedClientIds)
+:log info ("Leases converted to static: " . $convertedLeases)
+:log info ("Static leases with updated lease time: " . $updatedLeaseTime)
+:log info "---"
