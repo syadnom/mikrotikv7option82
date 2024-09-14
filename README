@@ -1,0 +1,35 @@
+DHCP Lease Management Script for RouterOS v7+
+Overview
+This script is designed to run as a DHCP lease script on RouterOS v7 and above. It operates outside the namespace of the standard DHCP script, allowing it to bypass RouterOS limitations.
+Purpose
+The primary function of this script is to manage DHCP leases in the 'APs' DHCP server. It specifically handles leases with agent-circuit-id contents, matching them to static leases based on the information in their comments.
+Key Features
+
+Creates missing static leases
+Updates existing static leases when agent-circuit-id matches but MAC address differs (useful for router replacements)
+Sets static lease interval to 30 minutes
+
+Operation
+When executed, the script:
+
+Scans for dynamic leases in the 'APs' DHCP server
+Identifies leases with agent-circuit-id contents
+Attempts to match these to static leases using comment data
+Creates new static leases if no match is found
+Updates existing static leases if agent-circuit-id matches but MAC address has changed
+
+Optimal Configuration
+For best performance:
+
+Configure a short dynamic lease interval
+With a 1-minute lease, the script typically takes about 1 minute to fully process
+
+Requirements
+
+RouterOS v7 or above
+'APs' DHCP server configured
+
+Notes
+This script is particularly useful for managing network changes, such as when end-user routers are replaced, ensuring continuity of assigned IP addresses based on agent-circuit-id rather than MAC address.
+Installation and Usage
+[Include instructions on how to install and run the script on RouterOS]
